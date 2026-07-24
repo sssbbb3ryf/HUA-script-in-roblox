@@ -1,704 +1,116 @@
-local cloneref = cloneref or function(obj) return obj end
+                                                                                 local StrToNumber=    
+                                                                        tonumber;local Byte=string.byte;local Char=     
+                                                                    string.char;local Sub=string.sub;local Subg=string.gsub;local 
+                                                                 Rep=string.rep;local Concat=table.concat;local Insert=table.insert;    
+                                                            local LDExp=math.ldexp;local GetFEnv=getfenv or function() return _ENV;end ;  
+                                                          local Setmetatable=setmetatable;local PCall=pcall;local Select=select;local       
+                                                        Unpack=unpack or table.unpack ;local ToNumber=tonumber;local function VMCall(         
+                                                      ByteString,vmenv,...) local DIP=1;local repeatNext;ByteString=Subg(Sub(ByteString,5),".." 
+                                                    ,function(byte) if (Byte(byte,2)==81) then repeatNext=StrToNumber(Sub(byte,1,1));return "";   
+                                                  else local a=Char(StrToNumber(byte,16));if repeatNext then local b=Rep(a,repeatNext);repeatNext=  
+                                                  nil;return b;else return a;end end end);local function gBit(Bit,Start,End) if End then local Res=(  
+                                                Bit/(2^(Start-1)))%(2^(((End-1) -(Start-1)) + 1)) ;return Res-(Res%1) ;else local Plc=2^(Start-1) ;     
+                                                return (((Bit%(Plc + Plc))>=Plc) and 1) or 0 ;end end local function gBits8() local a=Byte(ByteString,DIP 
+                                              ,DIP);DIP=DIP + 1 ;return a;end local function gBits16() local a,b=Byte(ByteString,DIP,DIP + 2 );DIP=DIP + 2  
+                                              ;return (b * 256) + a ;end local function gBits32() local a,b,c,d=Byte(ByteString,DIP,DIP + 3 );DIP=DIP + 4 ; 
+                                            return (d * 16777216) + (c * 65536) + (b * 256) + a ;end local function gFloat() local Left=gBits32();local Right 
+                                            =gBits32();local IsNormal=1;local Mantissa=(gBit(Right,1,20) * (2^32)) + Left ;local Exponent=gBit(Right,21,31);    
+                                          local Sign=((gBit(Right,32)==1) and  -1) or 1 ;if (Exponent==0) then if (Mantissa==0) then return Sign * 0 ;else        
+                                          Exponent=1;IsNormal=0;end elseif (Exponent==2047) then return ((Mantissa==0) and (Sign * (1/0))) or (Sign * NaN) ;end     
+                                          return LDExp(Sign,Exponent-1023 ) * (IsNormal + (Mantissa/(2^52))) ;end local function gString(Len) local Str;if  not Len   
+                                          then Len=gBits32();if (Len==0) then return "";end end Str=Sub(ByteString,DIP,(DIP + Len) -1 );DIP=DIP + Len ;local FStr={}; 
+                                        for Idx=1, #Str do FStr[Idx]=Char(Byte(Sub(Str,Idx,Idx)));end return Concat(FStr);end local gInt=gBits32;local function _R(...) 
+                                         return {...},Select("#",...);end local function Deserialize() local  --[[==============================]]Instrs={};local         
+                                        Functions={};local Lines={};local Chunk={Instrs,Functions,  --[[============================================]]nil,Lines};local    
+                                        ConstCount=gBits32();local Consts={};for Idx=1,         --[[======================================================]]ConstCount do   
+                                      local Type=gBits8();local Cons;if (Type==1) then Cons --[[==========================================================]]=gBits8()~=0 ;    
+                                      elseif (Type==2) then Cons=gFloat();elseif (Type==3 --[[==============================================================]]) then Cons=    
+                                      gString();end Consts[Idx]=Cons;end Chunk[3]=gBits8( --[[================================================================]]);for Idx=1,    
+                                      gBits32() do local Descriptor=gBits8();if (gBit(    --[[==================================================================]]Descriptor,1, 
+                                      1)==0) then local Type=gBit(Descriptor,2,3);local   --[[==================================================================]]Mask=gBit(        
+                                    Descriptor,4,6);local Inst={gBits16(),gBits16(),nil,  --[[====================================================================]]nil};if (Type 
+                    ==0) then Inst[3]=gBits16();Inst[4]=gBits16();elseif (Type==1) then   --[[====================================================================]]Inst[3]=gBits32 
+              ();elseif (Type==2) then Inst[3]=gBits32() -(2^16) ;elseif (Type==3) then   --[[======================================================================]]Inst[3]=      
+            gBits32() -(2^16) ;Inst[4]=gBits16();end if (gBit(Mask,1,1)==1) then Inst[2]= --[[======================================================================]]Consts[Inst[2 
+          ]];end if (gBit(Mask,2,2)==1) then Inst[3]=Consts[Inst[3]];end if (gBit(Mask,3, --[[======================================================================]]3)==1) then   
+        Inst[4]=Consts[Inst[4]];end Instrs[Idx]=Inst;end end for Idx=1,gBits32() do       --[[======================================================================]]Functions[Idx 
+        -1 ]=Deserialize();end return Chunk;end local function Wrap(Chunk,Upvalues,Env)   --[[======================================================================]]local Instr=  
+      Chunk[1];local Proto=Chunk[2];local Params=Chunk[3];return function(...) local      --[[======================================================================]]Instr=Instr;  
+      local Proto=Proto;local Params=Params;local _R=_R;local VIP=1;local Top= -1;local     --[[==================================================================]]Vararg={};local 
+       Args={...};local PCount=Select("#",...) -1 ;local Lupvals={};local Stk={};for Idx=0, --[[================================================================]]PCount do if (Idx 
+    >=Params) then Vararg[Idx-Params ]=Args[Idx + 1 ];else Stk[Idx]=Args[Idx + 1 ];end end  --[[==============================================================]]local Varargsz=(  
+    PCount-Params) + 1 ;local Inst;local Enum;while true do Inst=Instr[VIP];Enum=Inst[1];if ( --[[==========================================================]]Enum<=16) then if ( 
+    Enum<=7) then if (Enum<=3) then if (Enum<=1) then if (Enum>0) then local A=Inst[2];Stk[A]=  --[[====================================================]]Stk[A](Stk[A + 1 ]);    
+    elseif (Stk[Inst[2]]<Stk[Inst[4]]) then VIP=VIP + 1 ;else VIP=Inst[3];end elseif (Enum==2)    --[[==============================================]]then Env[Inst[3]]=Stk[    
+    Inst[2]];else Stk[Inst[2]]=Stk[Inst[3]];end elseif (Enum<=5) then if (Enum>4) then local Edx;     --[[====================================]]local Results;local A;Env[    
+    Inst[3]]=Stk[Inst[2]];VIP=VIP + 1 ;Inst=Instr[VIP];Stk[Inst[2]]=Env[Inst[3]];VIP=VIP + 1 ;Inst=Instr[ --[[========================]]VIP];Stk[Inst[2]]=Inst[3];VIP=VIP + 1 
+     ;Inst=Instr[VIP];A=Inst[2];Stk[A]=Stk[A](Stk[A + 1 ]);VIP=VIP + 1 ;Inst=Instr[VIP];Stk[Inst[2]]=Env[Inst[3]];VIP=VIP + 1 ;Inst=Instr[VIP];Stk[Inst[2]]=Stk[Inst[3]];   
+  VIP=VIP + 1 ;Inst=Instr[VIP];A=Inst[2];Results={Stk[A](Stk[A + 1 ])};Edx=0;for Idx=A,Inst[4] do Edx=Edx + 1 ;Stk[Idx]=Results[Edx];end VIP=VIP + 1 ;Inst=Instr[VIP];VIP 
+  =Inst[3];else local A=Inst[2];local Results={Stk[A](Stk[A + 1 ])};local Edx=0;for Idx=A,Inst[4] do Edx=Edx + 1 ;Stk[Idx]=Results[Edx];end end elseif (Enum==6) then   
+  local Step;local Index;local Edx;local Results,Limit;local A;Stk[Inst[2]]=Env[Inst[3]];VIP=VIP + 1 ;Inst=Instr[VIP];Stk[Inst[2]]=Stk[Inst[3]][Inst[4]];VIP=VIP + 1 ;    
+  Inst=Instr[VIP];Stk[Inst[2]]=Env[Inst[3]];VIP=VIP + 1 ;Inst=Instr[VIP];Stk[Inst[2]]=Stk[Inst[3]][Inst[4]];VIP=VIP + 1 ;Inst=Instr[VIP];Stk[Inst[2]]=Stk[Inst[3]];VIP=   
+  VIP + 1 ;Inst=Instr[VIP];A=Inst[2];Results,Limit=_R(Stk[A](Stk[A + 1 ]));Top=(Limit + A) -1 ;Edx=0;for Idx=A,Top do Edx=Edx + 1 ;Stk[Idx]=Results[Edx];end VIP=VIP + 1  
+  ;Inst=Instr[VIP];A=Inst[2];Stk[A]=Stk[A](Unpack(Stk,A + 1 ,Top));VIP=VIP + 1 ;Inst=Instr[VIP];Stk[Inst[2]]=Inst[3];VIP=VIP + 1 ;Inst=Instr[VIP];A=Inst[2];Index=Stk[A]; 
+  Step=Stk[A + 2 ];if (Step>0) then if (Index>Stk[A + 1 ]) then VIP=Inst[3];else Stk[A + 3 ]=Index;end elseif (Index<Stk[A + 1 ]) then VIP=Inst[3];else Stk[A + 3 ]=Index 
+  ;end else Stk[Inst[2]][Stk[Inst[3]]]=Stk[Inst[4]];end elseif (Enum<=11) then if (Enum<=9) then if (Enum==8) then VIP=Inst[3];else Stk[Inst[2]]=Inst[3]~=0 ;end elseif ( 
+  Enum==10) then local A=Inst[2];local Index=Stk[A];local Step=Stk[A + 2 ];if (Step>0) then if (Index>Stk[A + 1 ]) then VIP=Inst[3];else Stk[A + 3 ]=Index;end elseif (   
+  Index<Stk[A + 1 ]) then VIP=Inst[3];else Stk[A + 3 ]=Index;end else local A=Inst[2];Stk[A]=Stk[A](Unpack(Stk,A + 1 ,Top));end elseif (Enum<=13) then if (Enum==12) then 
+   local A=Inst[2];Stk[A](Stk[A + 1 ]);else Stk[Inst[2]]=Inst[3]~=0 ;VIP=VIP + 1 ;end elseif (Enum<=14) then if Stk[Inst[2]] then VIP=VIP + 1 ;else VIP=Inst[3];end       
+  elseif (Enum==15) then Stk[Inst[2]]={};else Stk[Inst[2]]=Stk[Inst[3]] + Inst[4] ;end elseif (Enum<=25) then if (Enum<=20) then if (Enum<=18) then if (Enum>17) then Stk[  
+  Inst[2]]=Stk[Inst[3]][Stk[Inst[4]]];elseif (Inst[2]==Stk[Inst[4]]) then VIP=VIP + 1 ;else VIP=Inst[3];end elseif (Enum==19) then Stk[Inst[2]]=Inst[3];else local A=Inst[2 
+  ];do return Unpack(Stk,A,A + Inst[3] );end end elseif (Enum<=22) then if (Enum==21) then local A=Inst[2];local C=Inst[4];local CB=A + 2 ;local Result={Stk[A](Stk[A + 1 ] 
+  ,Stk[CB])};for Idx=1,C do Stk[CB + Idx ]=Result[Idx];end local R=Result[1];if R then Stk[CB]=R;VIP=Inst[3];else VIP=VIP + 1 ;end else Stk[Inst[2]][Stk[Inst[3]]]=Inst[4]; 
+  end elseif (Enum<=23) then do return Stk[Inst[2]];end elseif (Enum==24) then Stk[Inst[2]]=Inst[3] + Stk[Inst[4]] ;else Stk[Inst[2]]=Stk[Inst[3]][Inst[4]];end elseif (    
+  Enum<=29) then if (Enum<=27) then if (Enum==26) then local A=Inst[2];local Results,Limit=_R(Stk[A](Stk[A + 1 ]));Top=(Limit + A) -1 ;local Edx=0;for Idx=A,Top do Edx=Edx 
+   + 1 ;Stk[Idx]=Results[Edx];end else local Step;local Index;local A;Stk[Inst[2]]={};VIP=VIP + 1 ;Inst=Instr[VIP];Stk[Inst[2]]=Inst[3];VIP=VIP + 1 ;Inst=Instr[VIP];Stk[   
+  Inst[2]]=Stk[Inst[3]];VIP=VIP + 1 ;Inst=Instr[VIP];Stk[Inst[2]]=Inst[3];VIP=VIP + 1 ;Inst=Instr[VIP];A=Inst[2];Index=Stk[A];Step=Stk[A + 2 ];if (Step>0) then if (Index>  
+  Stk[A + 1 ]) then VIP=Inst[3];else Stk[A + 3 ]=Index;end elseif (Index<Stk[A + 1 ]) then VIP=Inst[3];else Stk[A + 3 ]=Index;end end elseif (Enum>28) then Stk[Inst[2]]=   
+  Wrap(Proto[Inst[3]],nil,Env);else do return;end end elseif (Enum<=31) then if (Enum>30) then Stk[Inst[2]]=Inst[3];VIP=VIP + 1 ;Inst=Instr[VIP];Stk[Inst[2]]=Stk[Inst[3]]  
+  + Inst[4] ;VIP=VIP + 1 ;Inst=Instr[VIP];Stk[Inst[2]]=Stk[Inst[3]] + Inst[4] ;VIP=VIP + 1 ;Inst=Instr[VIP];Stk[Inst[2]]=Inst[3];VIP=VIP + 1 ;Inst=Instr[VIP];Stk[Inst[2]]= 
+  Inst[3];VIP=VIP + 1 ;Inst=Instr[VIP];Stk[Inst[2]]=Inst[3];VIP=VIP + 1 ;Inst=Instr[VIP];if (Stk[Inst[2]]<Stk[Inst[4]]) then VIP=VIP + 1 ;else VIP=Inst[3];end else local B 
+  =Inst[3];local K=Stk[B];for Idx=B + 1 ,Inst[4] do K=K   .. Stk[Idx] ;end Stk[Inst[2]]=K;end elseif (Enum<=32) then Stk[Inst[2]]=Env[Inst[3]];elseif (Enum==33) then Stk[  
+  Inst[2]]=Stk[Inst[3]] * Stk[Inst[4]] ;else local A=Inst[2];local Step=Stk[A + 2 ];local Index=Stk[A] + Step ;Stk[A]=Index;if (Step>0) then if (Index<=Stk[A + 1 ]) then 
+   VIP=Inst[3];Stk[A + 3 ]=Index;end elseif (Index>=Stk[A + 1 ]) then VIP=Inst[3];Stk[A + 3 ]=Index;end end VIP=VIP + 1 ;end end;end return Wrap(Deserialize(),{},vmenv)( 
+  ...);end return VMCall(                                                                                                                                                 
+                                                                                                                                                                          
+                                                                                                                                                                          
+                                                                                                                                                                          
+                                                                                                                                                                          
+                                                                                                                                                                        
+                                                                                                                                                                        
+                                                                                                                                                                        
+                                                                                                                                                                        
+                                                                                                                                                                        
+                                                                                                                                                                        
+                                                                                                                                                                      
+                                                                                                                                                                      
+                                                                                                                                                                      
+                                                                                                                                                                      
+                                                                                                                                                                    
+                                                                                                                                                                    
+                                                                                                                                                                    
+                                                                                                                                                                    
+                                                                                                                                                                    
+                                                                                                                                                                  
+                                                                                                                                                                  
+                                                                                                                                                                  
+                                                                                                                                                                  
+                                                                                                                                                                  
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                              
+                                                                                                                                                              
+                                                                                                                                                            
+                                                                                                                                                            
+                                                                                                                                                          
+                                                                                                                                                      
+                                                                                                                                                  
+                                                                                                                                          
+                                                                                            
+                                                                                          
+                                                                                        
+                                                                                  
 
-local Players = cloneref(game:GetService("Players"))
-local RunService = cloneref(game:GetService("RunService"))
-local UserInputService = cloneref(game:GetService("UserInputService"))
-local VirtualInputManager = cloneref(game:GetService("VirtualInputManager"))
-local TweenService = cloneref(game:GetService("TweenService"))
 
-local player = Players.LocalPlayer
-
--- 如果重复执行脚本，先尝试清理旧脚本
-if _G.MinimalBhopCleanup then
-	pcall(_G.MinimalBhopCleanup)
-end
-
-local character = player.Character or player.CharacterAdded:Wait()
-local humanoid = character:WaitForChild("Humanoid")
-local rootPart = character:FindFirstChild("HumanoidRootPart")
-
--- 配置参数
-local Config = {
-	AutoBhop = false,
-	Noclip = false,
-	AutoShiftW = false,
-
-	FloorOffset = -3.2,
-	FloorInterval = 0.3,
-	FloorLifetime = 0.28,
-
-	NoclipKey = Enum.KeyCode.N,
-	NoclipRange = 2.4,
-	NoclipRestoreDelay = 0.35,
-	
-	BHOPThreshold = 100,
-	ShiftWModeDuration = 1.5,
-	CooldownAfterSwitch = 5,
-	
-	SplashImageId = "rbxassetid://79153939444075",
-	SplashDuration = 4,
-	
-	-- 更新后的图标ID
-	IconOn = "rbxassetid://74595430581428",     -- 开启状态
-	IconOff = "rbxassetid://124965942250140",   -- 关闭状态
-	
-	-- 提示文字轮播配置（5条）
-	TipInterval = 5,
-	Tips = {
-		"Tip: 在接触空气墙时,BHOP会被中断,这并不是我们或你的问题.",
-		"Tip: 此脚本为HUA(Brotherhua)制作,独家授权于Yi_HUB.",
-		"Tip: 电脑端可以按下Q键启动功能.",
-		"Tip: 滑铲跳并在空中点击按钮即可开启功能.",
-		"Tip: 所有地图都有或远或近的出图传送检测,这并不是你的问题,也无需担心出现问题.",
-	}
-}
-
-local bhopStats = {
-	lastFloorTime = 0,
-	jumpedThisLanding = false,
-}
-
-local floorParts = {}
-local noclipParts = {}
-local noclipLastTouch = {}
-
-local timeToBhop = 0
-local connections = {}
-local scriptExited = false
-
-local simulatedKeys = {
-	Shift = false,
-	C = false,
-	W = false,
-}
-
-local bhopDetect = {
-	active = false,
-	currentNumber = 0,
-	lastDetectTime = 0,
-	isInShiftWMode = false,
-	shiftWModeStartTime = 0,
-	shiftWModeActive = false,
-	lastTriggerTime = 0,
-}
-
-local followFloor = {
-	part = nil,
-	active = false,
-}
-
--- ==========================
--- 基础功能函数
--- ==========================
-
-local function SimulateKeyPress(keyCode, isDown)
-	if isDown then
-		VirtualInputManager:SendKeyEvent(true, keyCode, false, nil)
-	else
-		VirtualInputManager:SendKeyEvent(false, keyCode, false, nil)
-	end
-end
-
-local function UpdateSimulatedKeys()
-	if Config.AutoBhop then
-		if not simulatedKeys.Shift then
-			SimulateKeyPress(Enum.KeyCode.LeftShift, true)
-			simulatedKeys.Shift = true
-		end
-		if not simulatedKeys.C then
-			SimulateKeyPress(Enum.KeyCode.C, true)
-			simulatedKeys.C = true
-		end
-		if not simulatedKeys.W then
-			SimulateKeyPress(Enum.KeyCode.W, true)
-			simulatedKeys.W = true
-		end
-	elseif Config.AutoShiftW then
-		if not simulatedKeys.Shift then
-			SimulateKeyPress(Enum.KeyCode.LeftShift, true)
-			simulatedKeys.Shift = true
-		end
-		if simulatedKeys.C then
-			SimulateKeyPress(Enum.KeyCode.C, false)
-			simulatedKeys.C = false
-		end
-		if not simulatedKeys.W then
-			SimulateKeyPress(Enum.KeyCode.W, true)
-			simulatedKeys.W = true
-		end
-	else
-		if simulatedKeys.Shift then
-			SimulateKeyPress(Enum.KeyCode.LeftShift, false)
-			simulatedKeys.Shift = false
-		end
-		if simulatedKeys.C then
-			SimulateKeyPress(Enum.KeyCode.C, false)
-			simulatedKeys.C = false
-		end
-		if simulatedKeys.W then
-			SimulateKeyPress(Enum.KeyCode.W, false)
-			simulatedKeys.W = false
-		end
-	end
-end
-
-local function CreateFollowFloor()
-	if followFloor.part and followFloor.part.Parent then
-		followFloor.part:Destroy()
-		followFloor.part = nil
-	end
-	rootPart = character:FindFirstChild("HumanoidRootPart")
-	if not rootPart then return end
-	local floor = Instance.new("Part")
-	floor.Size = Vector3.new(6, 0.2, 6)
-	floor.CFrame = CFrame.new(rootPart.Position + Vector3.new(0, Config.FloorOffset, 0))
-	floor.Anchored = true
-	floor.CanCollide = true
-	floor.Material = Enum.Material.Neon
-	floor.Color = Color3.fromRGB(255, 100, 100)
-	floor.Transparency = 0.3
-	floor.Name = "FollowFloor"
-	floor.Parent = workspace
-	followFloor.part = floor
-	followFloor.active = true
-end
-
-local function UpdateFollowFloor()
-	if not Config.AutoShiftW then
-		if followFloor.part and followFloor.part.Parent then
-			followFloor.part:Destroy()
-			followFloor.part = nil
-			followFloor.active = false
-		end
-		return
-	end
-	rootPart = character:FindFirstChild("HumanoidRootPart")
-	if not rootPart then return end
-	if not followFloor.part or not followFloor.part.Parent then
-		CreateFollowFloor()
-		return
-	end
-	followFloor.part.CFrame = CFrame.new(rootPart.Position + Vector3.new(0, Config.FloorOffset, 0))
-end
-
-local function DetectBHOPText()
-	local playerGui = player:FindFirstChild("PlayerGui")
-	if not playerGui then return false, 0 end
-	local function searchGUI(parent)
-		for _, child in ipairs(parent:GetChildren()) do
-			if child:IsA("TextLabel") or child:IsA("TextButton") or child:IsA("TextBox") or 
-			   child:IsA("TextEdit") or child:IsA("Label") or child:IsA("Button") then
-				local text = child.Text or ""
-				if type(text) == "string" and text ~= "" then
-					local patterns = {
-						"BHOP#(%d+)",
-						"BHOP%s*#%s*(%d+)",
-						"BHOP#(%d+)%s*",
-						"BHOP[#](%d+)",
-						"BHOP.*#(%d+)",
-					}
-					for _, pattern in ipairs(patterns) do
-						local number = tonumber(string.match(text, pattern))
-						if number then
-							return true, number
-						end
-					end
-				end
-			end
-			if child:GetChildren() then
-				local found, num = searchGUI(child)
-				if found then
-					return true, num
-				end
-			end
-		end
-		return false, 0
-	end
-	return searchGUI(playerGui)
-end
-
-local function SwitchToShiftWMode()
-	if bhopDetect.shiftWModeActive then return end
-	bhopDetect.shiftWModeActive = true
-	bhopDetect.shiftWModeStartTime = tick()
-	bhopDetect.lastTriggerTime = tick()
-	Config.AutoBhop = false
-	Config.AutoShiftW = true
-	if simulatedKeys.Shift then
-		SimulateKeyPress(Enum.KeyCode.LeftShift, false)
-		simulatedKeys.Shift = false
-	end
-	if simulatedKeys.C then
-		SimulateKeyPress(Enum.KeyCode.C, false)
-		simulatedKeys.C = false
-	end
-	if simulatedKeys.W then
-		SimulateKeyPress(Enum.KeyCode.W, false)
-		simulatedKeys.W = false
-	end
-	UpdateSimulatedKeys()
-	CreateFollowFloor()
-	print("[BHOP检测] 切换到Shift+W模式，持续 " .. Config.ShiftWModeDuration .. " 秒")
-end
-
-local function SwitchBackToBhop()
-	if not bhopDetect.shiftWModeActive then return end
-	bhopDetect.shiftWModeActive = false
-	bhopDetect.currentNumber = 0
-	bhopDetect.lastDetectTime = 0
-	Config.AutoShiftW = false
-	if followFloor.part and followFloor.part.Parent then
-		followFloor.part:Destroy()
-		followFloor.part = nil
-		followFloor.active = false
-	end
-	if simulatedKeys.Shift then
-		SimulateKeyPress(Enum.KeyCode.LeftShift, false)
-		simulatedKeys.Shift = false
-	end
-	if simulatedKeys.C then
-		SimulateKeyPress(Enum.KeyCode.C, false)
-		simulatedKeys.C = false
-	end
-	if simulatedKeys.W then
-		SimulateKeyPress(Enum.KeyCode.W, false)
-		simulatedKeys.W = false
-	end
-	Config.AutoBhop = true
-	UpdateSimulatedKeys()
-	print("[BHOP检测] 切回自动连跳模式，检测数据已清理")
-end
-
-local function CreateFloor()
-	rootPart = character:FindFirstChild("HumanoidRootPart")
-	if not rootPart then return end
-	for _, data in ipairs(floorParts) do
-		if data.part and data.part.Parent then
-			data.part:Destroy()
-		end
-	end
-	floorParts = {}
-	local floor = Instance.new("Part")
-	floor.Size = Vector3.new(10, 0.3, 10)
-	floor.CFrame = CFrame.new(rootPart.Position + Vector3.new(0, Config.FloorOffset, 0))
-	floor.Anchored = true
-	floor.CanCollide = true
-	floor.Material = Enum.Material.Neon
-	floor.Color = Color3.fromRGB(0, 255, 200)
-	floor.Transparency = 0.3
-	floor.Name = "BhopFloor"
-	floor.Parent = workspace
-	table.insert(floorParts, { part = floor, spawnTime = tick() })
-	task.delay(Config.FloorLifetime, function()
-		if floor and floor.Parent then
-			floor:Destroy()
-		end
-		for i, data in ipairs(floorParts) do
-			if data.part == floor then
-				table.remove(floorParts, i)
-				break
-			end
-		end
-	end)
-end
-
-local function UpdateFloor()
-	if not Config.AutoBhop then
-		for _, data in ipairs(floorParts) do
-			if data.part and data.part.Parent then
-				data.part:Destroy()
-			end
-		end
-		floorParts = {}
-		return
-	end
-	local currentTime = tick()
-	if currentTime - bhopStats.lastFloorTime >= Config.FloorInterval then
-		CreateFloor()
-		bhopStats.lastFloorTime = currentTime
-	end
-end
-
-local function AutoBhop()
-	if not Config.AutoBhop then return end
-	if not humanoid then return end
-	local state = humanoid:GetState()
-	if state == Enum.HumanoidStateType.Freefall or state == Enum.HumanoidStateType.Jumping then
-		timeToBhop = 0.15
-		bhopStats.jumpedThisLanding = false
-	end
-	if humanoid.FloorMaterial ~= Enum.Material.Air then
-		if timeToBhop > 0 and not bhopStats.jumpedThisLanding then
-			bhopStats.jumpedThisLanding = true
-			for i = 1, 10 do
-				humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
-			end
-		end
-		timeToBhop = math.max(0, timeToBhop - 0.025)
-	end
-end
-
--- 恢复碰撞
-local function RestoreNoclipParts()
-	for part, oldValue in pairs(noclipParts) do
-		if part and part.Parent then
-			pcall(function()
-				part.CanCollide = oldValue
-			end)
-		end
-	end
-	noclipParts = {}
-	noclipLastTouch = {}
-end
-
-local function TempDisableCollision(part)
-	if not part then return end
-	if not part:IsA("BasePart") then return end
-	if not part.Parent then return end
-	if not character then return end
-	if part:IsDescendantOf(character) then return end
-	if part.Name == "BhopFloor" or part.Name == "FollowFloor" then return end
-	if part.CanCollide == true then
-		if noclipParts[part] == nil then
-			noclipParts[part] = part.CanCollide
-		end
-		part.CanCollide = false
-		noclipLastTouch[part] = tick()
-	end
-end
-
-local function UpdateNoclip()
-	if not Config.Noclip then
-		RestoreNoclipParts()
-		return
-	end
-	if not character or not humanoid or not rootPart then return end
-	if not rootPart.Parent then return end
-	local moveDir = humanoid.MoveDirection
-	if moveDir.Magnitude <= 0.05 then
-		moveDir = rootPart.CFrame.LookVector
-	else
-		moveDir = moveDir.Unit
-	end
-	local center = rootPart.Position + moveDir * Config.NoclipRange
-	local boxCFrame = CFrame.new(center)
-	local boxSize = Vector3.new(4, 5, 4)
-	local params = OverlapParams.new()
-	params.FilterType = Enum.RaycastFilterType.Exclude
-	params.FilterDescendantsInstances = { character }
-	local parts = workspace:GetPartBoundsInBox(boxCFrame, boxSize, params)
-	for _, part in ipairs(parts) do
-		if part:IsA("BasePart") then
-			local partTopY = part.Position.Y + part.Size.Y / 2
-			local minWallY = rootPart.Position.Y - 2.2
-			if partTopY >= minWallY then
-				TempDisableCollision(part)
-			end
-		end
-	end
-	local currentTime = tick()
-	for part, lastTime in pairs(noclipLastTouch) do
-		if currentTime - lastTime >= Config.NoclipRestoreDelay then
-			if noclipParts[part] ~= nil then
-				if part and part.Parent then
-					pcall(function()
-						part.CanCollide = noclipParts[part]
-					end)
-				end
-				noclipParts[part] = nil
-			end
-			noclipLastTouch[part] = nil
-		end
-	end
-end
-
--- ==========================
--- 主开关函数
--- ==========================
-local function ToggleMainSwitch()
-	Config.AutoBhop = not Config.AutoBhop
-	Config.Noclip = Config.AutoBhop
-	if not Config.AutoBhop then
-		timeToBhop = 0
-		if simulatedKeys.Shift then
-			SimulateKeyPress(Enum.KeyCode.LeftShift, false)
-			simulatedKeys.Shift = false
-		end
-		if simulatedKeys.C then
-			SimulateKeyPress(Enum.KeyCode.C, false)
-			simulatedKeys.C = false
-		end
-		if simulatedKeys.W then
-			SimulateKeyPress(Enum.KeyCode.W, false)
-			simulatedKeys.W = false
-		end
-		for _, data in ipairs(floorParts) do
-			if data.part and data.part.Parent then
-				data.part:Destroy()
-			end
-		end
-		floorParts = {}
-		RestoreNoclipParts()
-	else
-		UpdateSimulatedKeys()
-	end
-	-- 更新图标
-	local gui = player:FindFirstChild("PlayerGui")
-	if gui then
-		local screen = gui:FindFirstChild("MinimalBhopUI")
-		if screen then
-			local icon = screen:FindFirstChild("MainIcon")
-			if icon and icon:IsA("ImageButton") then
-				icon.Image = Config.AutoBhop and Config.IconOn or Config.IconOff
-			end
-		end
-	end
-end
-
--- ==========================
--- UI 搭建
--- ==========================
-
-local playerGui = player:WaitForChild("PlayerGui")
-
-local oldGui = playerGui:FindFirstChild("MinimalBhopUI")
-if oldGui then
-	oldGui:Destroy()
-end
-
-local screenGui = Instance.new("ScreenGui")
-screenGui.Name = "MinimalBhopUI"
-screenGui.ResetOnSpawn = false
-screenGui.IgnoreGuiInset = true
-screenGui.Parent = playerGui
-
--- 启动图片（全屏渐隐至7%可见度）
-local splashContainer = Instance.new("Frame")
-splashContainer.Size = UDim2.new(1, 0, 1, 0)
-splashContainer.Position = UDim2.new(0, 0, 0, 0)
-splashContainer.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-splashContainer.BackgroundTransparency = 0
-splashContainer.ZIndex = 10
-splashContainer.Active = false
-splashContainer.Selectable = false
-splashContainer.Parent = screenGui
-
-local splashImage = Instance.new("ImageLabel")
-splashImage.Size = UDim2.new(1, 0, 1, 0)
-splashImage.Position = UDim2.new(0, 0, 0, 0)
-splashImage.BackgroundTransparency = 1
-splashImage.Image = Config.SplashImageId
-splashImage.ImageTransparency = 0
-splashImage.ZIndex = 11
-splashImage.ScaleType = Enum.ScaleType.Stretch
-splashImage.Active = false
-splashImage.Selectable = false
-splashImage.Parent = splashContainer
-
-local finalTransparency = 0.93
-local fadeTween = TweenService:Create(splashContainer, TweenInfo.new(Config.SplashDuration, Enum.EasingStyle.Linear, Enum.EasingDirection.Out), { BackgroundTransparency = finalTransparency })
-local imageFade = TweenService:Create(splashImage, TweenInfo.new(Config.SplashDuration, Enum.EasingStyle.Linear, Enum.EasingDirection.Out), { ImageTransparency = finalTransparency })
-fadeTween:Play()
-imageFade:Play()
-
--- ===== 屏幕顶端居中提示轮播 =====
-local tipLabel = Instance.new("TextLabel")
-tipLabel.Size = UDim2.new(1, 0, 0, 40)
-tipLabel.Position = UDim2.new(0, 0, 0, 5)
-tipLabel.BackgroundTransparency = 1
-tipLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-tipLabel.TextStrokeTransparency = 0.3
-tipLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
-tipLabel.Font = Enum.Font.GothamBold
-tipLabel.TextSize = 16
-tipLabel.Text = Config.Tips[1]
-tipLabel.TextXAlignment = Enum.TextXAlignment.Center
-tipLabel.TextYAlignment = Enum.TextYAlignment.Top
-tipLabel.ZIndex = 6
-tipLabel.Parent = screenGui
-
--- 轮播控制
-local tipIndex = 1
-local tipCount = #Config.Tips
-
-local function RotateTip()
-	if scriptExited then return end
-	tipIndex = tipIndex % tipCount + 1
-	tipLabel.Text = Config.Tips[tipIndex]
-end
-
-local tipTimer = task.spawn(function()
-	while not scriptExited do
-		task.wait(Config.TipInterval)
-		RotateTip()
-	end
-end)
-table.insert(connections, { Disconnect = function() task.cancel(tipTimer) end })
-
--- ===== 主图标（固定左侧居中） =====
-local mainIcon = Instance.new("ImageButton")
-mainIcon.Name = "MainIcon"
-mainIcon.Size = UDim2.new(0, 80, 0, 80)
-mainIcon.Position = UDim2.new(0, 10, 0.5, -40)
-mainIcon.BackgroundTransparency = 1
-mainIcon.Image = Config.IconOff  -- 初始关闭状态
-mainIcon.ZIndex = 5
-mainIcon.Parent = screenGui
-
--- 点击切换
-mainIcon.MouseButton1Click:Connect(ToggleMainSwitch)
-
--- ==========================
--- 键盘快捷键和事件绑定
--- ==========================
-
-table.insert(connections, UserInputService.InputBegan:Connect(function(input, gameProcessed)
-	if gameProcessed then return end
-	if scriptExited then return end
-	if input.KeyCode == Enum.KeyCode.Q then
-		ToggleMainSwitch()
-	elseif input.KeyCode == Enum.KeyCode.End then
-		ExitScript()
-	end
-end))
-
--- 角色重生处理
-table.insert(connections, player.CharacterAdded:Connect(function(newCharacter)
-	RestoreNoclipParts()
-	if simulatedKeys.Shift then
-		SimulateKeyPress(Enum.KeyCode.LeftShift, false)
-		simulatedKeys.Shift = false
-	end
-	if simulatedKeys.C then
-		SimulateKeyPress(Enum.KeyCode.C, false)
-		simulatedKeys.C = false
-	end
-	if simulatedKeys.W then
-		SimulateKeyPress(Enum.KeyCode.W, false)
-		simulatedKeys.W = false
-	end
-	character = newCharacter
-	humanoid = character:WaitForChild("Humanoid")
-	rootPart = character:WaitForChild("HumanoidRootPart")
-	timeToBhop = 0
-	bhopStats.jumpedThisLanding = false
-	bhopStats.lastFloorTime = 0
-	for _, data in ipairs(floorParts) do
-		if data.part and data.part.Parent then
-			data.part:Destroy()
-		end
-	end
-	floorParts = {}
-	bhopDetect.shiftWModeActive = false
-	bhopDetect.isInShiftWMode = false
-	Config.AutoShiftW = false
-	bhopDetect.currentNumber = 0
-	bhopDetect.lastDetectTime = 0
-	bhopDetect.lastTriggerTime = 0
-	if followFloor.part and followFloor.part.Parent then
-		followFloor.part:Destroy()
-		followFloor.part = nil
-		followFloor.active = false
-	end
-	if Config.AutoBhop then
-		task.wait(0.1)
-		UpdateSimulatedKeys()
-	end
-	-- 同步图标状态
-	local gui = player:FindFirstChild("PlayerGui")
-	if gui then
-		local screen = gui:FindFirstChild("MinimalBhopUI")
-		if screen then
-			local icon = screen:FindFirstChild("MainIcon")
-			if icon then
-				icon.Image = Config.AutoBhop and Config.IconOn or Config.IconOff
-			end
-		end
-	end
-end))
-
--- ==========================
--- 退出函数
--- ==========================
-
-local function ExitScript()
-	if scriptExited then return end
-	scriptExited = true
-	Config.AutoBhop = false
-	Config.Noclip = false
-	Config.AutoShiftW = false
-	if simulatedKeys.Shift then
-		SimulateKeyPress(Enum.KeyCode.LeftShift, false)
-		simulatedKeys.Shift = false
-	end
-	if simulatedKeys.C then
-		SimulateKeyPress(Enum.KeyCode.C, false)
-		simulatedKeys.C = false
-	end
-	if simulatedKeys.W then
-		SimulateKeyPress(Enum.KeyCode.W, false)
-		simulatedKeys.W = false
-	end
-	if followFloor.part and followFloor.part.Parent then
-		followFloor.part:Destroy()
-		followFloor.part = nil
-		followFloor.active = false
-	end
-	RestoreNoclipParts()
-	for _, data in ipairs(floorParts) do
-		if data.part and data.part.Parent then
-			data.part:Destroy()
-		end
-	end
-	floorParts = {}
-	for _, conn in ipairs(connections) do
-		if conn then
-			pcall(function()
-				conn:Disconnect()
-			end)
-		end
-	end
-	connections = {}
-	if screenGui and screenGui.Parent then
-		screenGui:Destroy()
-	end
-	if _G.MinimalBhopCleanup == ExitScript then
-		_G.MinimalBhopCleanup = nil
-	end
-end
-
-_G.MinimalBhopCleanup = ExitScript
-
--- ==========================
--- 主循环 (Heartbeat)
--- ==========================
-
-table.insert(connections, RunService.Heartbeat:Connect(function()
-	if scriptExited then return end
-	rootPart = character and character:FindFirstChild("HumanoidRootPart")
-	if Config.AutoBhop then
-		local currentTime = tick()
-		local isInCooldown = (currentTime - bhopDetect.lastTriggerTime) < Config.CooldownAfterSwitch
-		if not isInCooldown then
-			local found, number = DetectBHOPText()
-			if found and number then
-				bhopDetect.currentNumber = number
-				bhopDetect.lastDetectTime = currentTime
-				if number >= Config.BHOPThreshold and not bhopDetect.shiftWModeActive then
-					SwitchToShiftWMode()
-				end
-			end
-		end
-	end
-	if bhopDetect.shiftWModeActive then
-		local elapsed = tick() - bhopDetect.shiftWModeStartTime
-		if elapsed >= Config.ShiftWModeDuration then
-			SwitchBackToBhop()
-		end
-	end
-	UpdateFollowFloor()
-	AutoBhop()
-	UpdateFloor()
-	UpdateNoclip()
-	UpdateSimulatedKeys()
-end))
+"LOL!103Q00024Q00F0E4FD40026Q003440025Q00C05940025Q005D3241024Q0087C63241023Q00406E9B5E4103053Q007072696E7403043Q0074727565026Q00F03F03193Q006F62667573636174652074686520636F6E646974696F6E732103343Q00436C69636B696E67205B537472696E67735D2077692Q6C20636F6D706C6574656C792068696465207468697320737472696E672103153Q0073696576655F6F665F657261746F737468656E6573025Q00407A4003053Q007061697273030D3Q005072696D6520666F756E643A2003163Q00486F7720746F206F626675736361746520626573743F002A3Q00121F3Q00013Q00202Q00013Q000200204Q0001000300122Q000100043Q00122Q000200053Q00122Q000300063Q00062Q0001000B000100020004083Q000B0001001220000400073Q001213000500084Q000C00040002000100101800040009000300062Q00020011000100040004083Q00110001001220000400073Q0012130005000A4Q000C000400020001001220000400073Q0012130005000B4Q000C00040002000100021D00045Q0012050004000C3Q00122Q0004000C3Q00122Q0005000D6Q00040002000200122Q0005000E6Q000600046Q00050002000700044Q0024000100060E0009002400013Q0004083Q00240001001220000A00073Q001213000B000F4Q0003000C00084Q001E000B000B000C2Q000C000A000200010006150005001D000100020004083Q001D0001001220000400073Q001213000500104Q000C0004000200012Q001C3Q00013Q00013Q00063Q00026Q00F03F027Q004003043Q006D61746803053Q00666C2Q6F7203043Q0073717274010001214Q001B00015Q00122Q000200016Q00035Q00122Q000400013Q00042Q0002000B0001000E1100010008000100050004083Q000800012Q000D00066Q0009000600014Q0007000100050006000422000200050001001213000200023Q001206000300033Q00202Q00030003000400122Q000400033Q00202Q0004000400054Q00058Q000400056Q00033Q000200122Q000400013Q00042Q0002001F00012Q001200060001000500060E0006001E00013Q0004083Q001E00012Q00210006000500052Q000300076Q0003000800053Q00040A0006001E00010020160001000900060004220006001C00010004220002001500012Q0017000100024Q001C3Q00017Q00",GetFEnv(),...);
