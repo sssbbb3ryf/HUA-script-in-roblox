@@ -1,0 +1,704 @@
+local cloneref = cloneref or function(obj) return obj end
+
+local Players = cloneref(game:GetService("Players"))
+local RunService = cloneref(game:GetService("RunService"))
+local UserInputService = cloneref(game:GetService("UserInputService"))
+local VirtualInputManager = cloneref(game:GetService("VirtualInputManager"))
+local TweenService = cloneref(game:GetService("TweenService"))
+
+local player = Players.LocalPlayer
+
+-- 如果重复执行脚本，先尝试清理旧脚本
+if _G.MinimalBhopCleanup then
+	pcall(_G.MinimalBhopCleanup)
+end
+
+local character = player.Character or player.CharacterAdded:Wait()
+local humanoid = character:WaitForChild("Humanoid")
+local rootPart = character:FindFirstChild("HumanoidRootPart")
+
+-- 配置参数
+local Config = {
+	AutoBhop = false,
+	Noclip = false,
+	AutoShiftW = false,
+
+	FloorOffset = -3.2,
+	FloorInterval = 0.3,
+	FloorLifetime = 0.28,
+
+	NoclipKey = Enum.KeyCode.N,
+	NoclipRange = 2.4,
+	NoclipRestoreDelay = 0.35,
+	
+	BHOPThreshold = 100,
+	ShiftWModeDuration = 1.5,
+	CooldownAfterSwitch = 5,
+	
+	SplashImageId = "rbxassetid://79153939444075",
+	SplashDuration = 4,
+	
+	-- 更新后的图标ID
+	IconOn = "rbxassetid://74595430581428",     -- 开启状态
+	IconOff = "rbxassetid://124965942250140",   -- 关闭状态
+	
+	-- 提示文字轮播配置（5条）
+	TipInterval = 5,
+	Tips = {
+		"Tip: 在接触空气墙时,BHOP会被中断,这并不是我们或你的问题.",
+		"Tip: 此脚本为HUA(Brotherhua)制作,独家授权于Yi_HUB.",
+		"Tip: 电脑端可以按下Q键启动功能.",
+		"Tip: 滑铲跳并在空中点击按钮即可开启功能.",
+		"Tip: 所有地图都有或远或近的出图传送检测,这并不是你的问题,也无需担心出现问题.",
+	}
+}
+
+local bhopStats = {
+	lastFloorTime = 0,
+	jumpedThisLanding = false,
+}
+
+local floorParts = {}
+local noclipParts = {}
+local noclipLastTouch = {}
+
+local timeToBhop = 0
+local connections = {}
+local scriptExited = false
+
+local simulatedKeys = {
+	Shift = false,
+	C = false,
+	W = false,
+}
+
+local bhopDetect = {
+	active = false,
+	currentNumber = 0,
+	lastDetectTime = 0,
+	isInShiftWMode = false,
+	shiftWModeStartTime = 0,
+	shiftWModeActive = false,
+	lastTriggerTime = 0,
+}
+
+local followFloor = {
+	part = nil,
+	active = false,
+}
+
+-- ==========================
+-- 基础功能函数
+-- ==========================
+
+local function SimulateKeyPress(keyCode, isDown)
+	if isDown then
+		VirtualInputManager:SendKeyEvent(true, keyCode, false, nil)
+	else
+		VirtualInputManager:SendKeyEvent(false, keyCode, false, nil)
+	end
+end
+
+local function UpdateSimulatedKeys()
+	if Config.AutoBhop then
+		if not simulatedKeys.Shift then
+			SimulateKeyPress(Enum.KeyCode.LeftShift, true)
+			simulatedKeys.Shift = true
+		end
+		if not simulatedKeys.C then
+			SimulateKeyPress(Enum.KeyCode.C, true)
+			simulatedKeys.C = true
+		end
+		if not simulatedKeys.W then
+			SimulateKeyPress(Enum.KeyCode.W, true)
+			simulatedKeys.W = true
+		end
+	elseif Config.AutoShiftW then
+		if not simulatedKeys.Shift then
+			SimulateKeyPress(Enum.KeyCode.LeftShift, true)
+			simulatedKeys.Shift = true
+		end
+		if simulatedKeys.C then
+			SimulateKeyPress(Enum.KeyCode.C, false)
+			simulatedKeys.C = false
+		end
+		if not simulatedKeys.W then
+			SimulateKeyPress(Enum.KeyCode.W, true)
+			simulatedKeys.W = true
+		end
+	else
+		if simulatedKeys.Shift then
+			SimulateKeyPress(Enum.KeyCode.LeftShift, false)
+			simulatedKeys.Shift = false
+		end
+		if simulatedKeys.C then
+			SimulateKeyPress(Enum.KeyCode.C, false)
+			simulatedKeys.C = false
+		end
+		if simulatedKeys.W then
+			SimulateKeyPress(Enum.KeyCode.W, false)
+			simulatedKeys.W = false
+		end
+	end
+end
+
+local function CreateFollowFloor()
+	if followFloor.part and followFloor.part.Parent then
+		followFloor.part:Destroy()
+		followFloor.part = nil
+	end
+	rootPart = character:FindFirstChild("HumanoidRootPart")
+	if not rootPart then return end
+	local floor = Instance.new("Part")
+	floor.Size = Vector3.new(6, 0.2, 6)
+	floor.CFrame = CFrame.new(rootPart.Position + Vector3.new(0, Config.FloorOffset, 0))
+	floor.Anchored = true
+	floor.CanCollide = true
+	floor.Material = Enum.Material.Neon
+	floor.Color = Color3.fromRGB(255, 100, 100)
+	floor.Transparency = 0.3
+	floor.Name = "FollowFloor"
+	floor.Parent = workspace
+	followFloor.part = floor
+	followFloor.active = true
+end
+
+local function UpdateFollowFloor()
+	if not Config.AutoShiftW then
+		if followFloor.part and followFloor.part.Parent then
+			followFloor.part:Destroy()
+			followFloor.part = nil
+			followFloor.active = false
+		end
+		return
+	end
+	rootPart = character:FindFirstChild("HumanoidRootPart")
+	if not rootPart then return end
+	if not followFloor.part or not followFloor.part.Parent then
+		CreateFollowFloor()
+		return
+	end
+	followFloor.part.CFrame = CFrame.new(rootPart.Position + Vector3.new(0, Config.FloorOffset, 0))
+end
+
+local function DetectBHOPText()
+	local playerGui = player:FindFirstChild("PlayerGui")
+	if not playerGui then return false, 0 end
+	local function searchGUI(parent)
+		for _, child in ipairs(parent:GetChildren()) do
+			if child:IsA("TextLabel") or child:IsA("TextButton") or child:IsA("TextBox") or 
+			   child:IsA("TextEdit") or child:IsA("Label") or child:IsA("Button") then
+				local text = child.Text or ""
+				if type(text) == "string" and text ~= "" then
+					local patterns = {
+						"BHOP#(%d+)",
+						"BHOP%s*#%s*(%d+)",
+						"BHOP#(%d+)%s*",
+						"BHOP[#](%d+)",
+						"BHOP.*#(%d+)",
+					}
+					for _, pattern in ipairs(patterns) do
+						local number = tonumber(string.match(text, pattern))
+						if number then
+							return true, number
+						end
+					end
+				end
+			end
+			if child:GetChildren() then
+				local found, num = searchGUI(child)
+				if found then
+					return true, num
+				end
+			end
+		end
+		return false, 0
+	end
+	return searchGUI(playerGui)
+end
+
+local function SwitchToShiftWMode()
+	if bhopDetect.shiftWModeActive then return end
+	bhopDetect.shiftWModeActive = true
+	bhopDetect.shiftWModeStartTime = tick()
+	bhopDetect.lastTriggerTime = tick()
+	Config.AutoBhop = false
+	Config.AutoShiftW = true
+	if simulatedKeys.Shift then
+		SimulateKeyPress(Enum.KeyCode.LeftShift, false)
+		simulatedKeys.Shift = false
+	end
+	if simulatedKeys.C then
+		SimulateKeyPress(Enum.KeyCode.C, false)
+		simulatedKeys.C = false
+	end
+	if simulatedKeys.W then
+		SimulateKeyPress(Enum.KeyCode.W, false)
+		simulatedKeys.W = false
+	end
+	UpdateSimulatedKeys()
+	CreateFollowFloor()
+	print("[BHOP检测] 切换到Shift+W模式，持续 " .. Config.ShiftWModeDuration .. " 秒")
+end
+
+local function SwitchBackToBhop()
+	if not bhopDetect.shiftWModeActive then return end
+	bhopDetect.shiftWModeActive = false
+	bhopDetect.currentNumber = 0
+	bhopDetect.lastDetectTime = 0
+	Config.AutoShiftW = false
+	if followFloor.part and followFloor.part.Parent then
+		followFloor.part:Destroy()
+		followFloor.part = nil
+		followFloor.active = false
+	end
+	if simulatedKeys.Shift then
+		SimulateKeyPress(Enum.KeyCode.LeftShift, false)
+		simulatedKeys.Shift = false
+	end
+	if simulatedKeys.C then
+		SimulateKeyPress(Enum.KeyCode.C, false)
+		simulatedKeys.C = false
+	end
+	if simulatedKeys.W then
+		SimulateKeyPress(Enum.KeyCode.W, false)
+		simulatedKeys.W = false
+	end
+	Config.AutoBhop = true
+	UpdateSimulatedKeys()
+	print("[BHOP检测] 切回自动连跳模式，检测数据已清理")
+end
+
+local function CreateFloor()
+	rootPart = character:FindFirstChild("HumanoidRootPart")
+	if not rootPart then return end
+	for _, data in ipairs(floorParts) do
+		if data.part and data.part.Parent then
+			data.part:Destroy()
+		end
+	end
+	floorParts = {}
+	local floor = Instance.new("Part")
+	floor.Size = Vector3.new(10, 0.3, 10)
+	floor.CFrame = CFrame.new(rootPart.Position + Vector3.new(0, Config.FloorOffset, 0))
+	floor.Anchored = true
+	floor.CanCollide = true
+	floor.Material = Enum.Material.Neon
+	floor.Color = Color3.fromRGB(0, 255, 200)
+	floor.Transparency = 0.3
+	floor.Name = "BhopFloor"
+	floor.Parent = workspace
+	table.insert(floorParts, { part = floor, spawnTime = tick() })
+	task.delay(Config.FloorLifetime, function()
+		if floor and floor.Parent then
+			floor:Destroy()
+		end
+		for i, data in ipairs(floorParts) do
+			if data.part == floor then
+				table.remove(floorParts, i)
+				break
+			end
+		end
+	end)
+end
+
+local function UpdateFloor()
+	if not Config.AutoBhop then
+		for _, data in ipairs(floorParts) do
+			if data.part and data.part.Parent then
+				data.part:Destroy()
+			end
+		end
+		floorParts = {}
+		return
+	end
+	local currentTime = tick()
+	if currentTime - bhopStats.lastFloorTime >= Config.FloorInterval then
+		CreateFloor()
+		bhopStats.lastFloorTime = currentTime
+	end
+end
+
+local function AutoBhop()
+	if not Config.AutoBhop then return end
+	if not humanoid then return end
+	local state = humanoid:GetState()
+	if state == Enum.HumanoidStateType.Freefall or state == Enum.HumanoidStateType.Jumping then
+		timeToBhop = 0.15
+		bhopStats.jumpedThisLanding = false
+	end
+	if humanoid.FloorMaterial ~= Enum.Material.Air then
+		if timeToBhop > 0 and not bhopStats.jumpedThisLanding then
+			bhopStats.jumpedThisLanding = true
+			for i = 1, 10 do
+				humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+			end
+		end
+		timeToBhop = math.max(0, timeToBhop - 0.025)
+	end
+end
+
+-- 恢复碰撞
+local function RestoreNoclipParts()
+	for part, oldValue in pairs(noclipParts) do
+		if part and part.Parent then
+			pcall(function()
+				part.CanCollide = oldValue
+			end)
+		end
+	end
+	noclipParts = {}
+	noclipLastTouch = {}
+end
+
+local function TempDisableCollision(part)
+	if not part then return end
+	if not part:IsA("BasePart") then return end
+	if not part.Parent then return end
+	if not character then return end
+	if part:IsDescendantOf(character) then return end
+	if part.Name == "BhopFloor" or part.Name == "FollowFloor" then return end
+	if part.CanCollide == true then
+		if noclipParts[part] == nil then
+			noclipParts[part] = part.CanCollide
+		end
+		part.CanCollide = false
+		noclipLastTouch[part] = tick()
+	end
+end
+
+local function UpdateNoclip()
+	if not Config.Noclip then
+		RestoreNoclipParts()
+		return
+	end
+	if not character or not humanoid or not rootPart then return end
+	if not rootPart.Parent then return end
+	local moveDir = humanoid.MoveDirection
+	if moveDir.Magnitude <= 0.05 then
+		moveDir = rootPart.CFrame.LookVector
+	else
+		moveDir = moveDir.Unit
+	end
+	local center = rootPart.Position + moveDir * Config.NoclipRange
+	local boxCFrame = CFrame.new(center)
+	local boxSize = Vector3.new(4, 5, 4)
+	local params = OverlapParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	params.FilterDescendantsInstances = { character }
+	local parts = workspace:GetPartBoundsInBox(boxCFrame, boxSize, params)
+	for _, part in ipairs(parts) do
+		if part:IsA("BasePart") then
+			local partTopY = part.Position.Y + part.Size.Y / 2
+			local minWallY = rootPart.Position.Y - 2.2
+			if partTopY >= minWallY then
+				TempDisableCollision(part)
+			end
+		end
+	end
+	local currentTime = tick()
+	for part, lastTime in pairs(noclipLastTouch) do
+		if currentTime - lastTime >= Config.NoclipRestoreDelay then
+			if noclipParts[part] ~= nil then
+				if part and part.Parent then
+					pcall(function()
+						part.CanCollide = noclipParts[part]
+					end)
+				end
+				noclipParts[part] = nil
+			end
+			noclipLastTouch[part] = nil
+		end
+	end
+end
+
+-- ==========================
+-- 主开关函数
+-- ==========================
+local function ToggleMainSwitch()
+	Config.AutoBhop = not Config.AutoBhop
+	Config.Noclip = Config.AutoBhop
+	if not Config.AutoBhop then
+		timeToBhop = 0
+		if simulatedKeys.Shift then
+			SimulateKeyPress(Enum.KeyCode.LeftShift, false)
+			simulatedKeys.Shift = false
+		end
+		if simulatedKeys.C then
+			SimulateKeyPress(Enum.KeyCode.C, false)
+			simulatedKeys.C = false
+		end
+		if simulatedKeys.W then
+			SimulateKeyPress(Enum.KeyCode.W, false)
+			simulatedKeys.W = false
+		end
+		for _, data in ipairs(floorParts) do
+			if data.part and data.part.Parent then
+				data.part:Destroy()
+			end
+		end
+		floorParts = {}
+		RestoreNoclipParts()
+	else
+		UpdateSimulatedKeys()
+	end
+	-- 更新图标
+	local gui = player:FindFirstChild("PlayerGui")
+	if gui then
+		local screen = gui:FindFirstChild("MinimalBhopUI")
+		if screen then
+			local icon = screen:FindFirstChild("MainIcon")
+			if icon and icon:IsA("ImageButton") then
+				icon.Image = Config.AutoBhop and Config.IconOn or Config.IconOff
+			end
+		end
+	end
+end
+
+-- ==========================
+-- UI 搭建
+-- ==========================
+
+local playerGui = player:WaitForChild("PlayerGui")
+
+local oldGui = playerGui:FindFirstChild("MinimalBhopUI")
+if oldGui then
+	oldGui:Destroy()
+end
+
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "MinimalBhopUI"
+screenGui.ResetOnSpawn = false
+screenGui.IgnoreGuiInset = true
+screenGui.Parent = playerGui
+
+-- 启动图片（全屏渐隐至7%可见度）
+local splashContainer = Instance.new("Frame")
+splashContainer.Size = UDim2.new(1, 0, 1, 0)
+splashContainer.Position = UDim2.new(0, 0, 0, 0)
+splashContainer.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+splashContainer.BackgroundTransparency = 0
+splashContainer.ZIndex = 10
+splashContainer.Active = false
+splashContainer.Selectable = false
+splashContainer.Parent = screenGui
+
+local splashImage = Instance.new("ImageLabel")
+splashImage.Size = UDim2.new(1, 0, 1, 0)
+splashImage.Position = UDim2.new(0, 0, 0, 0)
+splashImage.BackgroundTransparency = 1
+splashImage.Image = Config.SplashImageId
+splashImage.ImageTransparency = 0
+splashImage.ZIndex = 11
+splashImage.ScaleType = Enum.ScaleType.Stretch
+splashImage.Active = false
+splashImage.Selectable = false
+splashImage.Parent = splashContainer
+
+local finalTransparency = 0.93
+local fadeTween = TweenService:Create(splashContainer, TweenInfo.new(Config.SplashDuration, Enum.EasingStyle.Linear, Enum.EasingDirection.Out), { BackgroundTransparency = finalTransparency })
+local imageFade = TweenService:Create(splashImage, TweenInfo.new(Config.SplashDuration, Enum.EasingStyle.Linear, Enum.EasingDirection.Out), { ImageTransparency = finalTransparency })
+fadeTween:Play()
+imageFade:Play()
+
+-- ===== 屏幕顶端居中提示轮播 =====
+local tipLabel = Instance.new("TextLabel")
+tipLabel.Size = UDim2.new(1, 0, 0, 40)
+tipLabel.Position = UDim2.new(0, 0, 0, 5)
+tipLabel.BackgroundTransparency = 1
+tipLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+tipLabel.TextStrokeTransparency = 0.3
+tipLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+tipLabel.Font = Enum.Font.GothamBold
+tipLabel.TextSize = 16
+tipLabel.Text = Config.Tips[1]
+tipLabel.TextXAlignment = Enum.TextXAlignment.Center
+tipLabel.TextYAlignment = Enum.TextYAlignment.Top
+tipLabel.ZIndex = 6
+tipLabel.Parent = screenGui
+
+-- 轮播控制
+local tipIndex = 1
+local tipCount = #Config.Tips
+
+local function RotateTip()
+	if scriptExited then return end
+	tipIndex = tipIndex % tipCount + 1
+	tipLabel.Text = Config.Tips[tipIndex]
+end
+
+local tipTimer = task.spawn(function()
+	while not scriptExited do
+		task.wait(Config.TipInterval)
+		RotateTip()
+	end
+end)
+table.insert(connections, { Disconnect = function() task.cancel(tipTimer) end })
+
+-- ===== 主图标（固定左侧居中） =====
+local mainIcon = Instance.new("ImageButton")
+mainIcon.Name = "MainIcon"
+mainIcon.Size = UDim2.new(0, 80, 0, 80)
+mainIcon.Position = UDim2.new(0, 10, 0.5, -40)
+mainIcon.BackgroundTransparency = 1
+mainIcon.Image = Config.IconOff  -- 初始关闭状态
+mainIcon.ZIndex = 5
+mainIcon.Parent = screenGui
+
+-- 点击切换
+mainIcon.MouseButton1Click:Connect(ToggleMainSwitch)
+
+-- ==========================
+-- 键盘快捷键和事件绑定
+-- ==========================
+
+table.insert(connections, UserInputService.InputBegan:Connect(function(input, gameProcessed)
+	if gameProcessed then return end
+	if scriptExited then return end
+	if input.KeyCode == Enum.KeyCode.Q then
+		ToggleMainSwitch()
+	elseif input.KeyCode == Enum.KeyCode.End then
+		ExitScript()
+	end
+end))
+
+-- 角色重生处理
+table.insert(connections, player.CharacterAdded:Connect(function(newCharacter)
+	RestoreNoclipParts()
+	if simulatedKeys.Shift then
+		SimulateKeyPress(Enum.KeyCode.LeftShift, false)
+		simulatedKeys.Shift = false
+	end
+	if simulatedKeys.C then
+		SimulateKeyPress(Enum.KeyCode.C, false)
+		simulatedKeys.C = false
+	end
+	if simulatedKeys.W then
+		SimulateKeyPress(Enum.KeyCode.W, false)
+		simulatedKeys.W = false
+	end
+	character = newCharacter
+	humanoid = character:WaitForChild("Humanoid")
+	rootPart = character:WaitForChild("HumanoidRootPart")
+	timeToBhop = 0
+	bhopStats.jumpedThisLanding = false
+	bhopStats.lastFloorTime = 0
+	for _, data in ipairs(floorParts) do
+		if data.part and data.part.Parent then
+			data.part:Destroy()
+		end
+	end
+	floorParts = {}
+	bhopDetect.shiftWModeActive = false
+	bhopDetect.isInShiftWMode = false
+	Config.AutoShiftW = false
+	bhopDetect.currentNumber = 0
+	bhopDetect.lastDetectTime = 0
+	bhopDetect.lastTriggerTime = 0
+	if followFloor.part and followFloor.part.Parent then
+		followFloor.part:Destroy()
+		followFloor.part = nil
+		followFloor.active = false
+	end
+	if Config.AutoBhop then
+		task.wait(0.1)
+		UpdateSimulatedKeys()
+	end
+	-- 同步图标状态
+	local gui = player:FindFirstChild("PlayerGui")
+	if gui then
+		local screen = gui:FindFirstChild("MinimalBhopUI")
+		if screen then
+			local icon = screen:FindFirstChild("MainIcon")
+			if icon then
+				icon.Image = Config.AutoBhop and Config.IconOn or Config.IconOff
+			end
+		end
+	end
+end))
+
+-- ==========================
+-- 退出函数
+-- ==========================
+
+local function ExitScript()
+	if scriptExited then return end
+	scriptExited = true
+	Config.AutoBhop = false
+	Config.Noclip = false
+	Config.AutoShiftW = false
+	if simulatedKeys.Shift then
+		SimulateKeyPress(Enum.KeyCode.LeftShift, false)
+		simulatedKeys.Shift = false
+	end
+	if simulatedKeys.C then
+		SimulateKeyPress(Enum.KeyCode.C, false)
+		simulatedKeys.C = false
+	end
+	if simulatedKeys.W then
+		SimulateKeyPress(Enum.KeyCode.W, false)
+		simulatedKeys.W = false
+	end
+	if followFloor.part and followFloor.part.Parent then
+		followFloor.part:Destroy()
+		followFloor.part = nil
+		followFloor.active = false
+	end
+	RestoreNoclipParts()
+	for _, data in ipairs(floorParts) do
+		if data.part and data.part.Parent then
+			data.part:Destroy()
+		end
+	end
+	floorParts = {}
+	for _, conn in ipairs(connections) do
+		if conn then
+			pcall(function()
+				conn:Disconnect()
+			end)
+		end
+	end
+	connections = {}
+	if screenGui and screenGui.Parent then
+		screenGui:Destroy()
+	end
+	if _G.MinimalBhopCleanup == ExitScript then
+		_G.MinimalBhopCleanup = nil
+	end
+end
+
+_G.MinimalBhopCleanup = ExitScript
+
+-- ==========================
+-- 主循环 (Heartbeat)
+-- ==========================
+
+table.insert(connections, RunService.Heartbeat:Connect(function()
+	if scriptExited then return end
+	rootPart = character and character:FindFirstChild("HumanoidRootPart")
+	if Config.AutoBhop then
+		local currentTime = tick()
+		local isInCooldown = (currentTime - bhopDetect.lastTriggerTime) < Config.CooldownAfterSwitch
+		if not isInCooldown then
+			local found, number = DetectBHOPText()
+			if found and number then
+				bhopDetect.currentNumber = number
+				bhopDetect.lastDetectTime = currentTime
+				if number >= Config.BHOPThreshold and not bhopDetect.shiftWModeActive then
+					SwitchToShiftWMode()
+				end
+			end
+		end
+	end
+	if bhopDetect.shiftWModeActive then
+		local elapsed = tick() - bhopDetect.shiftWModeStartTime
+		if elapsed >= Config.ShiftWModeDuration then
+			SwitchBackToBhop()
+		end
+	end
+	UpdateFollowFloor()
+	AutoBhop()
+	UpdateFloor()
+	UpdateNoclip()
+	UpdateSimulatedKeys()
+end))
